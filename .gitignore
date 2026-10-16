@@ -1,0 +1,9 @@
+app/node_modules/
+app/.next/
+app/.env
+app/.env.local
+eval/images/*.jpg
+eval/images/*.jpeg
+eval/images/*.png
+eval/images/*.webp
+!eval/images/.gitkeep
