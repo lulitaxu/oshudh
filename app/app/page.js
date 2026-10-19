@@ -152,6 +152,7 @@ export default function Home() {
   const [ixError, setIxError] = useState("");
   const [speaking, setSpeaking] = useState(false);
   const fileRef = useRef(null);
+  const galleryRef = useRef(null);
   const voiceOK =
     typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -239,6 +240,7 @@ export default function Home() {
     setPhase("idle");
     setError("");
     if (fileRef.current) fileRef.current.value = "";
+    if (galleryRef.current) galleryRef.current.value = "";
   }
 
   const takenCount = Object.values(taken).filter(Boolean).length;
@@ -370,21 +372,29 @@ export default function Home() {
 
       {phase === "idle" && (
         <>
-          <label className="drop">
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={onFile}
-            />
-            <div className="big">Take a photo or upload one</div>
-            <div className="sub">
-              A clear, flat photo of the prescription works best.
-              <br />
-              Your photo never leaves this demo.
-            </div>
-          </label>
+          <div className="upload-row">
+            <label className="drop half">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={onFile}
+              />
+              <div className="big">Take a photo</div>
+              <div className="sub">Opens your camera</div>
+            </label>
+            <label className="drop half">
+              <input
+                ref={galleryRef}
+                type="file"
+                accept="image/*"
+                onChange={onFile}
+              />
+              <div className="big">Choose from gallery</div>
+              <div className="sub">An existing photo</div>
+            </label>
+          </div>
           {preview && (
             <div className="preview">
               <img src={preview} alt="Prescription preview" />
