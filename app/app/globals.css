@@ -246,6 +246,61 @@ body {
   background: var(--card);
 }
 
+/* ---------- needs-your-eyes review list ---------- */
+.review-list { list-style: none; margin-top: 4px; }
+.review {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  width: 100%;
+  background: none;
+  border: 0;
+  border-top: 1px dotted var(--line-strong);
+  padding: 10px 2px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  cursor: pointer;
+  text-align: left;
+}
+.review.done span:last-child {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+/* ---------- interaction check ---------- */
+.ix-list { list-style: none; margin-top: 6px; }
+.ix {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  border-top: 1px solid var(--line-strong);
+  margin-bottom: -1px;
+  border-bottom: 1px solid var(--line-strong);
+  padding: 14px 2px;
+}
+.ix-sev {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+.ix-sev::before { content: ""; width: 8px; height: 8px; flex-shrink: 0; }
+.sev-major .ix-sev { color: var(--red); }
+.sev-major .ix-sev::before { background: var(--red); }
+.sev-moderate .ix-sev { color: var(--ochre); }
+.sev-moderate .ix-sev::before { background: var(--ochre); }
+.sev-minor .ix-sev { color: var(--green-ink); }
+.sev-minor .ix-sev::before { background: var(--green); }
+.ix strong { font-size: 15px; }
+.ix p { font-size: 13.5px; color: var(--ink-soft); margin-top: 4px; line-height: 1.6; }
+
 /* ---------- section titles ---------- */
 .section-title {
   display: flex;

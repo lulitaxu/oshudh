@@ -103,34 +103,50 @@ export function validateParse(data) {
 }
 
 export async function geminiParsePrescription(imageDataUrl) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY not set");
-  const primary = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-
   const match = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(
     imageDataUrl || ""
   );
   if (!match) throw new Error("bad image data URL");
   const [, mimeType, b64] = match;
 
-  // Try the primary model; on capacity errors fall back to the lighter one.
-  // Config errors (bad key, unknown model) throw immediately — no point retrying.
+  const data = await geminiJson({
+    systemPrompt: SYSTEM_PROMPT,
+    parts: [
+      { text: "Transcribe this prescription photo. Return JSON only." },
+      { inlineData: { mimeType, data: b64 } },
+    ],
+    temperature: 0.1,
+    maxOutputTokens: 4096,
+  });
+  return validateParse(data);
+}
+
+// Generic JSON call with automatic fallback to the lighter model on
+// capacity errors (429/503/529). Config errors throw immediately.
+export async function geminiJson({ systemPrompt, parts, temperature = 0.2, maxOutputTokens = 2048 }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY not set");
+  const primary = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+
   const models = primary === FALLBACK_MODEL ? [primary] : [primary, FALLBACK_MODEL];
   let lastErr = null;
   for (const model of models) {
     try {
-      const text = await callGeminiModel(model, apiKey, mimeType, b64);
+      const text = await callGeminiModel(model, apiKey, {
+        systemPrompt,
+        parts,
+        temperature,
+        maxOutputTokens,
+      });
       const clean = text
         .replace(/^```(?:json)?\s*/i, "")
         .replace(/\s*```\s*$/, "")
         .trim();
-      let data;
       try {
-        data = JSON.parse(clean);
+        return JSON.parse(clean);
       } catch {
         throw new Error("model returned invalid JSON");
       }
-      return validateParse(data);
     } catch (err) {
       if (!isCapacityError(err)) throw err;
       lastErr = err;
@@ -144,7 +160,7 @@ function isCapacityError(err) {
   return /\b(429|503|529)\b/.test(msg) || /overloaded|high demand/i.test(msg);
 }
 
-async function callGeminiModel(model, apiKey, mimeType, b64) {
+async function callGeminiModel(model, apiKey, { systemPrompt, parts, temperature, maxOutputTokens }) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
       model
@@ -156,19 +172,12 @@ async function callGeminiModel(model, apiKey, mimeType, b64) {
         "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [
-          {
-            parts: [
-              { text: "Transcribe this prescription photo. Return JSON only." },
-              { inlineData: { mimeType, data: b64 } },
-            ],
-          },
-        ],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ parts }],
         generationConfig: {
           responseMimeType: "application/json",
-          temperature: 0.1,
-          maxOutputTokens: 4096,
+          temperature,
+          maxOutputTokens,
         },
       }),
     }
@@ -182,4 +191,56 @@ async function callGeminiModel(model, apiKey, mimeType, b64) {
   return (json?.candidates?.[0]?.content?.parts || [])
     .map((p) => p.text || "")
     .join("");
+}
+
+// ---- Drug interaction check ----
+
+const IX_PROMPT = `You are a drug-interaction checker for Oshudh, a medication companion app.
+Given a list of medicines (Bangladeshi brand names with strengths), list pairwise
+interactions that are well established in clinical references.
+
+Rules:
+- Report ONLY interactions you are confident are real and documented.
+  When unsure, omit the pair entirely. Never invent an interaction.
+- Severity: "major" (avoid the combination, seek medical advice promptly),
+  "moderate" (monitor closely, tell the doctor), "minor" (usually manageable).
+- One plain-language line per interaction: what happens.
+- Output JSON only: { "interactions": [ { "drugs": ["A", "B"], "severity": "major|moderate|minor", "effect": "..." } ] }
+- If no known interactions, return { "interactions": [] }.
+- This is informational, not medical advice.`;
+
+const SEVERITY = new Set(["major", "moderate", "minor"]);
+
+export function validateInteractions(data) {
+  if (!data || !Array.isArray(data.interactions)) {
+    throw new Error("model returned bad interaction data");
+  }
+  return {
+    interactions: data.interactions.map((ix, i) => {
+      const drugs = Array.isArray(ix.drugs)
+        ? ix.drugs.filter((d) => typeof d === "string").slice(0, 3)
+        : [];
+      const sev = String(ix.severity || "").toLowerCase();
+      if (drugs.length < 2) throw new Error(`interaction[${i}]: needs 2 drugs`);
+      if (!SEVERITY.has(sev)) throw new Error(`interaction[${i}]: bad severity`);
+      if (typeof ix.effect !== "string" || !ix.effect.trim()) {
+        throw new Error(`interaction[${i}]: missing effect`);
+      }
+      return { drugs, severity: sev, effect: ix.effect.trim() };
+    }),
+  };
+}
+
+export async function checkInteractions(medicines) {
+  const list = (medicines || [])
+    .map((m) => `${m.name}${m.strength ? ` ${m.strength}` : ""}`.trim())
+    .filter(Boolean);
+  if (list.length < 2) return { interactions: [] };
+  const data = await geminiJson({
+    systemPrompt: IX_PROMPT,
+    parts: [{ text: `Medicines: ${list.join(", ")}` }],
+    temperature: 0.1,
+    maxOutputTokens: 2048,
+  });
+  return validateInteractions(data);
 }
