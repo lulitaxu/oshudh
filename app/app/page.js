@@ -380,7 +380,6 @@ export default function Home() {
         <div className="brand">
           Oshudh<small>ওষুধ</small>
         </div>
-        <span className="proto-tag">Prototype</span>
       </header>
 
       {phase !== "done" && (
@@ -622,7 +621,7 @@ export default function Home() {
       )}
 
       <footer className="footer">
-        Oshudh prototype · built for the Meta Global AI Developer Hackathon
+        Oshudh · built for the Meta Global AI Developer Hackathon
       </footer>
     </div>
   );
