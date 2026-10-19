@@ -30,6 +30,7 @@ function MedicineCard({ med, index, open, onToggle }) {
   return (
     <div className={`med${open ? " open" : ""}`}>
       <button className="med-head" onClick={onToggle} aria-expanded={open}>
+        <span className="med-index">{String(index + 1).padStart(2, "0")}</span>
         <span>
           <span className="med-name">
             {med.name} <span className="med-strength">{med.strength}</span>
@@ -212,6 +213,7 @@ export default function Home() {
 
       {phase !== "done" && (
         <section className="hero">
+          <p className="kicker">Prescription reader — Bangladesh</p>
           <h1>
             Can't read your <em>prescription?</em> Snap it.
           </h1>
