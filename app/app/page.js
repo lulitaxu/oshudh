@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { findTestInfo, CHEAPEST_TIP, CHAIN_TIP } from "@/lib/lab-prices";
+import Footer from "@/components/Footer";
 
 const PARSE_STEPS = [
   "Reading the handwriting",
@@ -620,9 +621,7 @@ export default function Home() {
         </div>
       )}
 
-      <footer className="footer">
-        Oshudh · built for the Meta Global AI Developer Hackathon
-      </footer>
+      <Footer />
     </div>
   );
 }
