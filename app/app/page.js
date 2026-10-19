@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { findTestInfo, CHEAPEST_TIP, CHAIN_TIP } from "@/lib/lab-prices";
 
 const PARSE_STEPS = [
   "Reading the handwriting",
@@ -138,6 +139,52 @@ function ScheduleView({ medicines, taken, onToggleDose }) {
   );
 }
 
+function LabTestRow({ name, index }) {
+  const [open, setOpen] = useState(false);
+  const info = findTestInfo(name);
+  return (
+    <div className={`med${open ? " open" : ""}`}>
+      <button className="med-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span className="med-index">{String(index + 1).padStart(2, "0")}</span>
+        <span>
+          <span className="med-name">{info ? info.name : name}</span>
+          {info && <span className="med-sub">Typical: {info.price}</span>}
+        </span>
+        <span className="med-right">
+          <span className="chev">{open ? "▾" : "▸"}</span>
+        </span>
+      </button>
+      <div className="med-body">
+        <div className="med-body-in">
+          <dl className="med-facts">
+            {info ? (
+              <>
+                <div>
+                  <dt>Typical private lab</dt>
+                  <dd><strong>{info.price}</strong></dd>
+                </div>
+                <div>
+                  <dt>Cheapest option</dt>
+                  <dd>{CHEAPEST_TIP}</dd>
+                </div>
+                <div>
+                  <dt>Good to know</dt>
+                  <dd>{CHAIN_TIP}</dd>
+                </div>
+              </>
+            ) : (
+              <div>
+                <dt>No price on file</dt>
+                <dd>{CHEAPEST_TIP} Call the lab ahead and ask.</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [preview, setPreview] = useState(null);
   const [phase, setPhase] = useState("idle"); // idle | parsing | done | error
@@ -152,7 +199,6 @@ export default function Home() {
   const [ixError, setIxError] = useState("");
   const [speaking, setSpeaking] = useState(false);
   const fileRef = useRef(null);
-  const galleryRef = useRef(null);
   const voiceOK =
     typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -240,7 +286,6 @@ export default function Home() {
     setPhase("idle");
     setError("");
     if (fileRef.current) fileRef.current.value = "";
-    if (galleryRef.current) galleryRef.current.value = "";
   }
 
   const takenCount = Object.values(taken).filter(Boolean).length;
@@ -372,29 +417,18 @@ export default function Home() {
 
       {phase === "idle" && (
         <>
-          <div className="upload-row">
-            <label className="drop half">
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={onFile}
-              />
-              <div className="big">Take a photo</div>
-              <div className="sub">Opens your camera</div>
-            </label>
-            <label className="drop half">
-              <input
-                ref={galleryRef}
-                type="file"
-                accept="image/*"
-                onChange={onFile}
-              />
-              <div className="big">Choose from gallery</div>
-              <div className="sub">An existing photo</div>
-            </label>
-          </div>
+          <label className="drop">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={onFile}
+            />
+            <div className="big">Take a photo or choose one</div>
+            <div className="sub">
+              A clear, flat photo of the prescription works best.
+            </div>
+          </label>
           {preview && (
             <div className="preview">
               <img src={preview} alt="Prescription preview" />
@@ -551,11 +585,27 @@ export default function Home() {
               <div className="med">
                 <div className="med-note" style={{ marginTop: 0 }}>
                   <strong>{result.follow_up}</strong>
-                  {result.lab_tests?.length > 0 && (
-                    <span> · Tests: {result.lab_tests.join(", ")}</span>
-                  )}
                 </div>
               </div>
+            </>
+          )}
+
+          {result.lab_tests?.length > 0 && (
+            <>
+              <h2 className="section-title">
+                Lab tests · {result.lab_tests.length}
+              </h2>
+              <p className="hint" style={{ marginTop: 0 }}>
+                Tap a test for typical prices and where to get it cheaper.
+              </p>
+              {result.lab_tests.map((t, i) => (
+                <LabTestRow key={i} name={t} index={i} />
+              ))}
+              <p className="hint">
+                Typical private-lab prices in Dhaka; they change often and
+                vary by branch. Government hospitals are usually the cheapest.
+                Call ahead to confirm.
+              </p>
             </>
           )}
 

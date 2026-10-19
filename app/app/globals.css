@@ -301,17 +301,6 @@ body {
 .ix strong { font-size: 15px; }
 .ix p { font-size: 13.5px; color: var(--ink-soft); margin-top: 4px; line-height: 1.6; }
 
-/* ---------- upload ---------- */
-.upload-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 8px;
-}
-.drop.half { margin-bottom: 0; padding: 30px 14px; }
-.drop.half .big { font-size: 16px; }
-.drop.half .sub { font-size: 12px; }
-
 /* ---------- section titles ---------- */
 .section-title {
   display: flex;
