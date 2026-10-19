@@ -69,7 +69,7 @@ export default function Terms() {
         <h2>Contact</h2>
         <p>
           Questions about these terms:{" "}
-          <a href="mailto:rarafat735@proton.me">rarafat735@proton.me</a>
+          <a href="mailto:contact@arafatarzu.me">contact@arafatarzu.me</a>
         </p>
       </article>
 
