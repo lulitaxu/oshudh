@@ -3,6 +3,9 @@
 // The key is read server-side only. Never import this file from client code.
 
 const DEFAULT_MODEL = "gemini-3.8-flash";
+// Lighter model with more free-tier headroom. Used automatically when the
+// primary model is overloaded or rate-limited (503/529/429).
+const FALLBACK_MODEL = "gemini-3.5-flash-lite";
 
 const SYSTEM_PROMPT = `You are the vision parser for Oshudh, a medication companion app for Bangladesh.
 You read photos of handwritten medical prescriptions and return structured data.
@@ -102,7 +105,7 @@ export function validateParse(data) {
 export async function geminiParsePrescription(imageDataUrl) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY not set");
-  const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const primary = process.env.GEMINI_MODEL || DEFAULT_MODEL;
 
   const match = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(
     imageDataUrl || ""
@@ -110,6 +113,38 @@ export async function geminiParsePrescription(imageDataUrl) {
   if (!match) throw new Error("bad image data URL");
   const [, mimeType, b64] = match;
 
+  // Try the primary model; on capacity errors fall back to the lighter one.
+  // Config errors (bad key, unknown model) throw immediately — no point retrying.
+  const models = primary === FALLBACK_MODEL ? [primary] : [primary, FALLBACK_MODEL];
+  let lastErr = null;
+  for (const model of models) {
+    try {
+      const text = await callGeminiModel(model, apiKey, mimeType, b64);
+      const clean = text
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```\s*$/, "")
+        .trim();
+      let data;
+      try {
+        data = JSON.parse(clean);
+      } catch {
+        throw new Error("model returned invalid JSON");
+      }
+      return validateParse(data);
+    } catch (err) {
+      if (!isCapacityError(err)) throw err;
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+function isCapacityError(err) {
+  const msg = String((err && err.message) || "");
+  return /\b(429|503|529)\b/.test(msg) || /overloaded|high demand/i.test(msg);
+}
+
+async function callGeminiModel(model, apiKey, mimeType, b64) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
       model
@@ -144,18 +179,7 @@ export async function geminiParsePrescription(imageDataUrl) {
     throw new Error(`Gemini API ${res.status}: ${errText.slice(0, 180)}`);
   }
   const json = await res.json();
-  const text = (json?.candidates?.[0]?.content?.parts || [])
+  return (json?.candidates?.[0]?.content?.parts || [])
     .map((p) => p.text || "")
     .join("");
-  const clean = text
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/, "")
-    .trim();
-  let data;
-  try {
-    data = JSON.parse(clean);
-  } catch {
-    throw new Error("model returned invalid JSON");
-  }
-  return validateParse(data);
 }
