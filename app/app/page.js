@@ -295,6 +295,12 @@ export default function Home() {
 
       {phase === "done" && result && (
         <div className="results">
+          {result._provider === "mock" && (
+            <p className="demo-notice">
+              Demo mode — showing sample medicines, not your prescription.
+              Live AI reading activates with the Meta API.
+            </p>
+          )}
           <h2 className="section-title">
             Medicines found · {result.medicines.length}
           </h2>

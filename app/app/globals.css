@@ -232,6 +232,20 @@ body {
 .steps li.done { color: var(--ink); }
 .steps li .tick { color: var(--green); font-weight: 700; }
 
+/* ---------- demo-mode notice ---------- */
+.demo-notice {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: var(--card);
+}
+
 /* ---------- section titles ---------- */
 .section-title {
   display: flex;
