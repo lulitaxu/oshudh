@@ -151,14 +151,36 @@ export default function Home() {
   function onFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPreview(reader.result);
+    // Downscale to max 1600px JPEG before upload: keeps the request under
+    // the serverless payload cap and uploads fast on mobile data.
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const MAX = 1600;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        setPreview(canvas.toDataURL("image/jpeg", 0.85));
+      } catch {
+        setError("Could not read that image.");
+        setPhase("error");
+        URL.revokeObjectURL(url);
+        return;
+      }
+      URL.revokeObjectURL(url);
       setPhase("idle");
       setResult(null);
       setError("");
     };
-    reader.readAsDataURL(f);
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setError("Could not read that image. Try a JPEG or PNG photo.");
+      setPhase("error");
+    };
+    img.src = url;
   }
 
   async function parse() {
