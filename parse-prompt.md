@@ -45,9 +45,15 @@ JSON only. No prose, no markdown fences. Schema:
 
 ## Rules
 
-1. Bangladeshi dosing shorthand: "1+0+1" = morning + noon + night.
-   "3½+0+0" = 3.5 tablets morning only. "0+0+1" = night only.
-   Fractions (½) are common. Convert to explicit per-slot text in `schedule`.
+1. Bangladeshi dosing shorthand is POSITIONAL: three slots in fixed order,
+   morning + noon + night. "1+0+1" = morning and night. "0+0+1" = night
+   only. "1+1+1" = all three. A 0 or a blank in a slot means NO dose there.
+   Sloppy handwriting means the same thing: "1 + 0 + 1", "1++1",
+   "1 + + 1" (blank middle = noon gets "none"). NEVER shift a dose into a
+   different slot: position 1 is always morning, position 2 always noon,
+   position 3 always night. Fractions (½) are common. Convert to explicit
+   per-slot text in `schedule`. If a slot is genuinely ambiguous, set
+   confidence "low" and describe it in `uncertain_spans`.
 
 2. Common BD brands to disambiguate messy handwriting: Cortan (prednisolone),
    Calbo (calcium carbonate), Pantonix (pantoprazole), Moxibac (moxifloxacin),
