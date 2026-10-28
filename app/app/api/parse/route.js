@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { SAMPLE_PARSE } from "@/lib/mock";
+import { rateLimit } from "@/lib/rate-limit";
 import { metaParsePrescription } from "@/lib/providers/meta";
 import { geminiParsePrescription } from "@/lib/providers/gemini";
 
@@ -19,7 +20,24 @@ function pickProvider() {
   return "mock";
 }
 
+// Each call spends paid vision-model quota and the route is public, so
+// limit per IP before anything else runs: 5/minute and 10/hour.
+const PARSE_LIMITS = [
+  { limit: 5, windowMs: 60 * 1000 },
+  { limit: 10, windowMs: 60 * 60 * 1000 },
+];
+
 export async function POST(req) {
+  const rl = rateLimit(req, "parse", PARSE_LIMITS);
+  if (!rl.ok) {
+    return NextResponse.json(
+      {
+        error:
+          "Too many photos in a short time. Please wait a little and try again.",
+      },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
   try {
     const { image } = await req.json();
     if (!image || typeof image !== "string" || !image.startsWith("data:image/")) {
@@ -44,15 +62,20 @@ export async function POST(req) {
 
     if (provider === "meta") {
       const parsed = await metaParsePrescription(image);
-      return NextResponse.json(parsed);
+      return NextResponse.json({ ...parsed, _provider: "meta" });
     }
 
     // mock: simulate model latency so the UI states get exercised
     await new Promise((r) => setTimeout(r, 2200));
     return NextResponse.json({ ...SAMPLE_PARSE, _provider: "mock" });
   } catch (err) {
+    // Provider details stay in the server log; clients get a generic line.
+    console.error("parse failed:", err);
     return NextResponse.json(
-      { error: err.message || "Parse failed." },
+      {
+        error:
+          "Something went wrong reading that photo. Please try again with a clearer photo.",
+      },
       { status: 500 }
     );
   }
