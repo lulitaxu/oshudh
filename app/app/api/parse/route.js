@@ -13,6 +13,16 @@ export const maxDuration = 60;
 // The client downscales photos to 1600px JPEG before upload.
 const MAX_IMAGE_CHARS = 6_000_000;
 
+// Only raster photo formats the providers genuinely accept. Anything
+// else (SVG, GIF, a bare data:image/ prefix) is rejected at the route,
+// before a provider call is spent on it.
+const ALLOWED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+]);
+
 function pickProvider() {
   if (process.env.MODEL_PROVIDER) return process.env.MODEL_PROVIDER;
   if (process.env.GEMINI_API_KEY) return "gemini";
@@ -40,9 +50,19 @@ export async function POST(req) {
   }
   try {
     const { image } = await req.json();
-    if (!image || typeof image !== "string" || !image.startsWith("data:image/")) {
+    if (!image || typeof image !== "string" || !image.startsWith("data:")) {
       return NextResponse.json(
         { error: "Send an image as a data URL." },
+        { status: 400 }
+      );
+    }
+    const imageType = /^data:([^;,]+)/.exec(image)?.[1]?.toLowerCase();
+    if (!ALLOWED_IMAGE_TYPES.has(imageType)) {
+      return NextResponse.json(
+        {
+          error:
+            "That image type is not supported. Send a JPEG, PNG, WebP or HEIC photo.",
+        },
         { status: 400 }
       );
     }
@@ -57,17 +77,17 @@ export async function POST(req) {
 
     if (provider === "gemini") {
       const parsed = await geminiParsePrescription(image);
-      return NextResponse.json({ ...parsed, _provider: "gemini" });
+      return NextResponse.json({ ...parsed });
     }
 
     if (provider === "meta") {
       const parsed = await metaParsePrescription(image);
-      return NextResponse.json({ ...parsed, _provider: "meta" });
+      return NextResponse.json({ ...parsed });
     }
 
     // mock: simulate model latency so the UI states get exercised
     await new Promise((r) => setTimeout(r, 2200));
-    return NextResponse.json({ ...SAMPLE_PARSE, _provider: "mock" });
+    return NextResponse.json({ ...SAMPLE_PARSE, demo: true });
   } catch (err) {
     // Provider details stay in the server log; clients get a generic line.
     console.error("parse failed:", err);

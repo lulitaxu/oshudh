@@ -1,1 +1,1 @@
-{"dependencies":{"next":"14.2.5","react":"^18","react-dom":"^18"},"name":"oshudh","private":true,"scripts":{"build":"next build","dev":"next dev","eval":"bash ../eval/run.sh","start":"next start"},"version":"0.1.0"}
+{"dependencies":{"next":"14.2.35","react":"^18","react-dom":"^18"},"name":"oshudh","private":true,"scripts":{"build":"next build","dev":"next dev","eval":"bash ../eval/run.sh","start":"next start"},"version":"0.1.0"}

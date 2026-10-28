@@ -464,7 +464,7 @@ export default function Home() {
 
       {phase === "done" && result && (
         <div className="results">
-          {result._provider === "mock" && (
+          {result.demo && (
             <p className="demo-notice">
               Demo mode — showing sample medicines, not your prescription.
               Live AI reading activates with an API key.

@@ -83,7 +83,7 @@ export async function POST(req) {
       return NextResponse.json({ interactions: [] });
     }
     const result = await checkInteractions(checked.medicines);
-    return NextResponse.json({ ...result, _provider: "gemini" });
+    return NextResponse.json({ ...result });
   } catch (err) {
     // Provider details stay in the server log; clients get a generic line.
     console.error("interaction check failed:", err);
