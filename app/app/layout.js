@@ -18,6 +18,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className={display.variable}>
+      <head>
+        <script defer src="/_vercel/insights/script.js"></script>
+      </head>
       <body>{children}</body>
     </html>
   );
