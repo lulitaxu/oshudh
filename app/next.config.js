@@ -1,6 +1,7 @@
 // CSP tuned to what the app actually uses: next/font self-hosts the font
-// files, photo previews are blob:/data: URLs, and the only network calls
-// are same-origin /api fetches. Provider calls happen server-side.
+// files, photo previews are blob:/data: URLs, and page network calls are
+// same-origin only (/api fetches plus the Vercel Insights analytics
+// script and its same-origin beacon). Provider calls happen server-side.
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",

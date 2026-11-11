@@ -62,8 +62,14 @@ advice." Your accuracy is the safety feature. When in doubt, say so.`;
 
 const CONFIDENCE = new Set(["high", "medium", "low"]);
 
-function asString(v) {
-  return typeof v === "string" ? v : null;
+// Bounds on model-controlled output: counts and string lengths are capped
+// in the validators below so a hallucinated or steered response cannot
+// produce an unbounded / type-confused API payload.
+const MAX_MEDICINES = 100;
+const MAX_LIST_ITEMS = 50;
+
+function asString(v, max = 500) {
+  return typeof v === "string" ? v.slice(0, max) : null;
 }
 
 function cleanMedicine(m, i) {
@@ -75,14 +81,15 @@ function cleanMedicine(m, i) {
     throw new Error(`medicine[${i}]: bad confidence "${m.confidence}"`);
   }
   const s = m.schedule && typeof m.schedule === "object" ? m.schedule : {};
-  const slot = (v) => (typeof v === "string" && v.trim() ? v.trim() : "none");
+  const slot = (v) =>
+    typeof v === "string" && v.trim() ? v.trim().slice(0, 100) : "none";
   return {
-    name: m.name.trim(),
-    strength: asString(m.strength),
-    schedule_raw: asString(m.schedule_raw) || "",
+    name: m.name.trim().slice(0, 200),
+    strength: asString(m.strength, 100),
+    schedule_raw: asString(m.schedule_raw, 100) || "",
     schedule: { morning: slot(s.morning), noon: slot(s.noon), night: slot(s.night) },
-    instruction_note: asString(m.instruction_note),
-    duration: asString(m.duration),
+    instruction_note: asString(m.instruction_note, 200),
+    duration: asString(m.duration, 200),
     confidence: conf,
   };
 }
@@ -91,18 +98,36 @@ export function validateParse(data) {
   if (!data || !Array.isArray(data.medicines) || data.medicines.length === 0) {
     throw new Error("model returned no medicines");
   }
+  if (data.medicines.length > MAX_MEDICINES) {
+    throw new Error("model returned too many medicines");
+  }
   const overall = String(data.overall_confidence || "").toLowerCase();
+  // Vitals are rebuilt from string fields only — never passed through as
+  // an arbitrary model-supplied object.
+  const vitals =
+    data.vitals && typeof data.vitals === "object" && !Array.isArray(data.vitals)
+      ? {
+          bp: asString(data.vitals.bp, 200),
+          other: asString(data.vitals.other, 200),
+        }
+      : null;
   return {
     medicines: data.medicines.map(cleanMedicine),
     diagnosis: asString(data.diagnosis),
-    vitals: data.vitals && typeof data.vitals === "object" ? data.vitals : null,
+    vitals,
     follow_up: asString(data.follow_up),
     lab_tests: Array.isArray(data.lab_tests)
-      ? data.lab_tests.filter((t) => typeof t === "string")
+      ? data.lab_tests
+          .filter((t) => typeof t === "string")
+          .slice(0, MAX_LIST_ITEMS)
+          .map((t) => t.slice(0, 200))
       : [],
     overall_confidence: CONFIDENCE.has(overall) ? overall : "low",
     uncertain_spans: Array.isArray(data.uncertain_spans)
-      ? data.uncertain_spans.filter((t) => typeof t === "string")
+      ? data.uncertain_spans
+          .filter((t) => typeof t === "string")
+          .slice(0, MAX_LIST_ITEMS)
+          .map((t) => t.slice(0, 300))
       : [],
   };
 }
@@ -160,37 +185,63 @@ export async function geminiJson({ systemPrompt, parts, temperature = 0.2, maxOu
   throw lastErr;
 }
 
+// Capacity is classified ONLY by the HTTP status captured structurally
+// at the fetch site (or a fetch timeout) — never by matching free text in
+// the provider's error body, which used to misclassify e.g. a 400 whose
+// body happened to contain "503" and re-spend the call on the fallback.
+const CAPACITY_STATUSES = new Set([429, 503, 529]);
+
 function isCapacityError(err) {
-  const msg = String((err && err.message) || "");
-  return /\b(429|503|529)\b/.test(msg) || /overloaded|high demand/i.test(msg);
+  return Boolean(err && CAPACITY_STATUSES.has(err.status));
+}
+
+function providerError(status, errText) {
+  const err = new Error(`Gemini API ${status}: ${String(errText || "").slice(0, 180)}`);
+  err.status = status;
+  return err;
 }
 
 async function callGeminiModel(model, apiKey, { systemPrompt, parts, temperature, maxOutputTokens }) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model
-    )}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ parts }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          temperature,
-          maxOutputTokens,
+  let res;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        model
+      )}:generateContent`,
+      {
+        method: "POST",
+        // A hanging provider must not stall the function for its full
+        // 60s budget; 25s leaves room for one fallback attempt.
+        signal: AbortSignal.timeout(25000),
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
         },
-      }),
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ parts }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature,
+            maxOutputTokens,
+          },
+        }),
+      }
+    );
+  } catch (err) {
+    if (err && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      // Treat a provider hang like a capacity error so the fallback model
+      // gets a chance instead of failing the request outright.
+      const timeoutErr = new Error("Gemini API request timed out");
+      timeoutErr.status = 503;
+      throw timeoutErr;
     }
-  );
+    throw err;
+  }
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    throw new Error(`Gemini API ${res.status}: ${errText.slice(0, 180)}`);
+    throw providerError(res.status, errText);
   }
   const json = await res.json();
   return (json?.candidates?.[0]?.content?.parts || [])
@@ -215,25 +266,59 @@ Rules:
 - This is informational, not medical advice.`;
 
 const SEVERITY = new Set(["major", "moderate", "minor"]);
+const MAX_INTERACTIONS = 50;
+const MAX_EFFECT_CHARS = 500;
 
-export function validateInteractions(data) {
+function normalizeDrugName(s) {
+  return String(s || "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+// A model-named drug counts as submitted when it matches a submitted
+// medicine's name, optionally with the strength appended (or vice versa).
+function drugWasSubmitted(drug, submittedNames) {
+  const d = normalizeDrugName(drug);
+  if (!d) return false;
+  return submittedNames.some(
+    (name) => d === name || d.startsWith(`${name} `) || name.startsWith(`${d} `)
+  );
+}
+
+export function validateInteractions(data, submittedMedicines) {
   if (!data || !Array.isArray(data.interactions)) {
     throw new Error("model returned bad interaction data");
   }
-  return {
-    interactions: data.interactions.map((ix, i) => {
-      const drugs = Array.isArray(ix.drugs)
-        ? ix.drugs.filter((d) => typeof d === "string").slice(0, 3)
-        : [];
-      const sev = String(ix.severity || "").toLowerCase();
-      if (drugs.length < 2) throw new Error(`interaction[${i}]: needs 2 drugs`);
-      if (!SEVERITY.has(sev)) throw new Error(`interaction[${i}]: bad severity`);
-      if (typeof ix.effect !== "string" || !ix.effect.trim()) {
-        throw new Error(`interaction[${i}]: missing effect`);
-      }
-      return { drugs, severity: sev, effect: ix.effect.trim() };
-    }),
-  };
+  // Provenance check: an interaction may only name medicines that were
+  // actually submitted. Entries naming anything else (hallucinated or
+  // steered output) are dropped, not surfaced.
+  const submittedNames = Array.isArray(submittedMedicines)
+    ? submittedMedicines.map((m) => normalizeDrugName(m && m.name)).filter(Boolean)
+    : null;
+  const interactions = [];
+  for (const [i, ix] of data.interactions.entries()) {
+    if (interactions.length >= MAX_INTERACTIONS) break;
+    if (!ix || typeof ix !== "object") {
+      throw new Error(`interaction[${i}]: bad entry`);
+    }
+    let drugs = Array.isArray(ix.drugs)
+      ? ix.drugs.filter((d) => typeof d === "string").map((d) => d.trim().slice(0, 120))
+      : [];
+    drugs = [...new Set(drugs.filter(Boolean))].slice(0, 3);
+    if (submittedNames && !drugs.every((d) => drugWasSubmitted(d, submittedNames))) {
+      continue;
+    }
+    const sev = String(ix.severity || "").toLowerCase();
+    if (drugs.length < 2) throw new Error(`interaction[${i}]: needs 2 drugs`);
+    if (!SEVERITY.has(sev)) throw new Error(`interaction[${i}]: bad severity`);
+    if (typeof ix.effect !== "string" || !ix.effect.trim()) {
+      throw new Error(`interaction[${i}]: missing effect`);
+    }
+    interactions.push({
+      drugs,
+      severity: sev,
+      effect: ix.effect.trim().slice(0, MAX_EFFECT_CHARS),
+    });
+  }
+  return { interactions };
 }
 
 export async function checkInteractions(medicines) {
@@ -247,5 +332,5 @@ export async function checkInteractions(medicines) {
     temperature: 0.1,
     maxOutputTokens: 2048,
   });
-  return validateInteractions(data);
+  return validateInteractions(data, medicines);
 }

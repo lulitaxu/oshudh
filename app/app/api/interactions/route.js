@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { rateLimit } from "@/lib/rate-limit";
+import { rateLimit, peekRateLimit, consumeProviderBudget } from "@/lib/rate-limit";
 import { checkInteractions } from "@/lib/providers/gemini";
 
 // POST /api/interactions  { medicines: [{ name, strength }] }
@@ -8,10 +8,13 @@ import { checkInteractions } from "@/lib/providers/gemini";
 export const maxDuration = 60;
 
 // Each call spends paid model quota and the route is public, so limit
-// per IP before anything else runs: 10/minute and 20/hour.
+// per IP: 10/minute and 40/hour. The hourly cap was raised from 20 when
+// the global daily provider circuit-breaker was added (audit 2026-11-11):
+// quota protection now comes from the global ceiling, so users sharing
+// one CGNAT egress IP starve each other less.
 const INTERACTION_LIMITS = [
   { limit: 10, windowMs: 60 * 1000 },
-  { limit: 20, windowMs: 60 * 60 * 1000 },
+  { limit: 40, windowMs: 60 * 60 * 1000 },
 ];
 
 // A prescription rarely lists more than a dozen medicines; cap the list
@@ -53,17 +56,22 @@ function sanitizeMedicines(medicines) {
   return { medicines: clean };
 }
 
+function tooMany(retryAfter) {
+  return NextResponse.json(
+    {
+      error:
+        "Too many checks in a short time. Please wait a little and try again.",
+    },
+    { status: 429, headers: { "Retry-After": String(retryAfter) } }
+  );
+}
+
 export async function POST(req) {
-  const rl = rateLimit(req, "interactions", INTERACTION_LIMITS);
-  if (!rl.ok) {
-    return NextResponse.json(
-      {
-        error:
-          "Too many checks in a short time. Please wait a little and try again.",
-      },
-      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
-    );
-  }
+  // Peek first: the key check and request validation below run before
+  // any budget is consumed, so 503/400 responses cannot burn the budget
+  // that legitimate requests behind the same shared IP need.
+  const peek = peekRateLimit(req, "interactions", INTERACTION_LIMITS);
+  if (!peek.ok) return tooMany(peek.retryAfter);
   try {
     if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json(
@@ -71,8 +79,16 @@ export async function POST(req) {
         { status: 503 }
       );
     }
-    const { medicines } = await req.json();
-    const checked = sanitizeMedicines(medicines);
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: "Send a list of medicines to check." },
+        { status: 400 }
+      );
+    }
+    const checked = sanitizeMedicines(body?.medicines);
     if (!checked || checked.error) {
       return NextResponse.json(
         { error: checked?.error || "Send a list of medicines to check." },
@@ -81,6 +97,21 @@ export async function POST(req) {
     }
     if (checked.medicines.length < 2) {
       return NextResponse.json({ interactions: [] });
+    }
+
+    // Validation passed — now consume per-IP budget.
+    const rl = rateLimit(req, "interactions", INTERACTION_LIMITS);
+    if (!rl.ok) return tooMany(rl.retryAfter);
+
+    // Global daily circuit-breaker (see lib/rate-limit.js).
+    if (!consumeProviderBudget()) {
+      return NextResponse.json(
+        {
+          error:
+            "Oshudh has hit its daily reading limit. Please try again tomorrow.",
+        },
+        { status: 503 }
+      );
     }
     const result = await checkInteractions(checked.medicines);
     return NextResponse.json({ ...result });

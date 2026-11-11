@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Component, useRef, useState } from "react";
 import { findTestInfo, CHEAPEST_TIP, CHAIN_TIP } from "@/lib/lab-prices";
 import Footer from "@/components/Footer";
 
@@ -19,11 +19,73 @@ const CONF_WHY = {
 
 const SLOT_BN = { morning: "সকাল", noon: "দুপুর", night: "রাত" };
 
+// The client defends its own render path: a malformed server response
+// must degrade to an error message, never a white screen.
+function isValidParseResult(data) {
+  if (!data || !Array.isArray(data.medicines) || data.medicines.length === 0) {
+    return false;
+  }
+  return data.medicines.every(
+    (m) =>
+      m &&
+      typeof m.name === "string" &&
+      m.schedule &&
+      typeof m.schedule === "object" &&
+      !Array.isArray(m.schedule)
+  );
+}
+
+function isValidIxResult(data) {
+  if (!data || !Array.isArray(data.interactions)) return false;
+  return data.interactions.every(
+    (ix) =>
+      ix &&
+      Array.isArray(ix.drugs) &&
+      ix.drugs.every((d) => typeof d === "string") &&
+      typeof ix.severity === "string" &&
+      typeof ix.effect === "string"
+  );
+}
+
+// Last-resort guard around the results section: a render throw shows a
+// recoverable message instead of blanking the whole screen.
+class ResultsBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(err) {
+    console.error("results render failed:", err);
+  }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="results">
+          <p style={{ color: "var(--red)" }}>
+            Something went wrong showing that reading. Please scan again.
+          </p>
+          <button
+            className="btn ghost"
+            onClick={() => window.location.reload()}
+          >
+            Start over
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function Confidence({ level }) {
   return <span className={`conf ${level}`}>{level}</span>;
 }
 
 function MedicineCard({ med, index, open, onToggle }) {
+  const schedule = med.schedule || {};
   const slots = [
     { key: "morning", label: "Morning" },
     { key: "noon", label: "Noon" },
@@ -39,8 +101,8 @@ function MedicineCard({ med, index, open, onToggle }) {
           </span>
           <span className="med-sub">
             {slots
-              .filter((s) => med.schedule[s.key] && med.schedule[s.key] !== "none")
-              .map((s) => `${s.label}: ${med.schedule[s.key]}`)
+              .filter((s) => schedule[s.key] && schedule[s.key] !== "none")
+              .map((s) => `${s.label}: ${schedule[s.key]}`)
               .join("  ·  ")}
           </span>
         </span>
@@ -53,7 +115,7 @@ function MedicineCard({ med, index, open, onToggle }) {
         <div className="med-body-in">
           <div className="slots">
             {slots.map((s) => {
-              const val = med.schedule[s.key];
+              const val = schedule[s.key];
               const on = val && val !== "none";
               return (
                 <span key={s.key} className={`slot${on ? " on" : ""}`}>
@@ -103,7 +165,10 @@ function ScheduleView({ medicines, taken, onToggleDose }) {
       {buckets.map((b) => {
         const items = medicines
           .map((m, i) => ({ m, i }))
-          .filter(({ m }) => m.schedule[b.key] && m.schedule[b.key] !== "none");
+          .filter(
+            ({ m }) =>
+              (m.schedule || {})[b.key] && (m.schedule || {})[b.key] !== "none"
+          );
         if (!items.length) return null;
         const allTaken = items.every(({ m, i }) => taken[`${i}-${b.key}`]);
         return (
@@ -127,7 +192,7 @@ function ScheduleView({ medicines, taken, onToggleDose }) {
                       <strong>
                         {m.name} {m.strength}
                       </strong>{" "}
-                      — {m.schedule[b.key]}
+                      — {(m.schedule || {})[b.key]}
                     </span>
                   </button>
                 );
@@ -255,6 +320,11 @@ export default function Home() {
       const data = await res.json();
       clearInterval(timer);
       if (!res.ok) throw new Error(data.error || "Parse failed");
+      if (!isValidParseResult(data)) {
+        throw new Error(
+          "That reading came back garbled. Please try again with a clearer photo."
+        );
+      }
       setStepsDone(PARSE_STEPS.length);
       setTimeout(() => {
         setResult(data);
@@ -311,7 +381,7 @@ export default function Home() {
     const parts = [];
     for (const s of slots) {
       const items = medicines.filter(
-        (m) => m.schedule[s.key] && m.schedule[s.key] !== "none"
+        (m) => (m.schedule || {})[s.key] && (m.schedule || {})[s.key] !== "none"
       );
       if (!items.length) continue;
       parts.push(
@@ -322,7 +392,7 @@ export default function Home() {
               (m) =>
                 `${m.name} ${m.strength || ""}`.trim() +
                 ", " +
-                bnDose(m.schedule[s.key])
+                bnDose((m.schedule || {})[s.key])
             )
             .join("; ")
       );
@@ -367,6 +437,9 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Check failed");
+      if (!isValidIxResult(data)) {
+        throw new Error("That check came back garbled. Please try again.");
+      }
       setIxResult(data);
       setIxState("done");
     } catch (err) {
@@ -463,6 +536,7 @@ export default function Home() {
       )}
 
       {phase === "done" && result && (
+        <ResultsBoundary>
         <div className="results">
           {result.demo && (
             <p className="demo-notice">
@@ -619,6 +693,7 @@ export default function Home() {
             Scan another prescription
           </button>
         </div>
+        </ResultsBoundary>
       )}
 
       <Footer />
